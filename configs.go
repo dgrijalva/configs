@@ -1,39 +1,37 @@
 package configs
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"io"
-	"os"
 )
 
-func Load(filename string, cfg interface{}, options ...LoadOption) error {
-	if file, err := os.Open(filename); err == nil {
-		return Parse(file, cfg, options...)
-	} else {
-		return err
-	}
-}
-
-func ParseBytes(data []byte, cfg interface{}, options ...LoadOption) error {
-	return Parse(bytes.NewReader(data), cfg, options...)
-}
-
-func Parse(rdr io.Reader, cfg interface{}, options ...LoadOption) error {
+// Load config.
+func Load(cfg interface{}, options ...LoadOption) error {
 	l := &configLoader{}
 
 	for _, option := range options {
-		option(l)
+		if err := option(l); err != nil {
+			return err
+		}
 	}
 
-	return l.Parse(rdr, cfg)
+	return l.Parse(cfg)
 }
 
 type configLoader struct {
-	UseFlags *flag.FlagSet
+	ConfigFileFlag *flag.Flag
+	UseFlags       *flag.FlagSet
+	io.Reader
 }
 
-func (l *configLoader) Parse(rdr io.Reader, cfg interface{}) error {
-	return json.NewDecoder(rdr).Decode(cfg)
+func (l *configLoader) Parse(cfg interface{}) error {
+	// TODO: flag parsing
+
+	// Parse json config
+	if err := json.NewDecoder(l.Reader).Decode(cfg); err != nil {
+		return err
+	}
+
+	return nil
 }

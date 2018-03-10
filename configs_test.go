@@ -17,6 +17,7 @@ type A struct {
 var tests = []struct {
 	name    string
 	config  interface{}
+	expect  interface{}
 	args    string
 	err     error
 	options []configs.LoadOption
@@ -24,6 +25,13 @@ var tests = []struct {
 	{
 		name:   "basic",
 		config: &A{"foo", 1.23, 123},
+	},
+	{
+		name:    "flags",
+		config:  &A{},
+		expect:  &A{"bar", 4.56, 456},
+		args:    "-string bar -float 4.56 -int 456",
+		options: []configs.LoadOption{configs.WithFlags(nil)},
 	},
 }
 
@@ -40,7 +48,8 @@ func TestParse(t *testing.T) {
 		if test.options == nil {
 			test.options = []configs.LoadOption{}
 		}
-		err := configs.Parse(buf, res, test.options...)
+		test.options = append(test.options, configs.WithReader(buf))
+		err := configs.Load(res, test.options...)
 
 		// Handle error cases
 		if err != nil {
@@ -55,7 +64,10 @@ func TestParse(t *testing.T) {
 		}
 
 		// Handle success cases
-		if !reflect.DeepEqual(test.config, res) {
+		if test.expect == nil {
+			test.expect = test.config
+		}
+		if !reflect.DeepEqual(test.expect, res) {
 			t.Errorf("[%v] Parsed config didn't match expectation. Expected %v got %T %v", test.name, test.config, res, res)
 		}
 	}
