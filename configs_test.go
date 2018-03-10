@@ -3,8 +3,10 @@ package configs_test
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"github.com/dgrijalva/configs"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -27,11 +29,10 @@ var tests = []struct {
 		config: &A{"foo", 1.23, 123},
 	},
 	{
-		name:    "flags",
-		config:  &A{},
-		expect:  &A{"bar", 4.56, 456},
-		args:    "-string bar -float 4.56 -int 456",
-		options: []configs.LoadOption{configs.WithFlags(nil)},
+		name:   "flags",
+		config: &A{},
+		expect: &A{"bar", 4.56, 456},
+		args:   "-string bar -float 4.56 -int 456",
 	},
 }
 
@@ -45,11 +46,22 @@ func TestParse(t *testing.T) {
 		var res interface{} = reflect.New(reflect.Indirect(reflect.ValueOf(test.config)).Type()).Interface()
 
 		// Load config
-		if test.options == nil {
-			test.options = []configs.LoadOption{}
+		testOptions := []configs.LoadOption{
+			configs.WithReader(buf),
 		}
-		test.options = append(test.options, configs.WithReader(buf))
-		err := configs.Load(res, test.options...)
+		if test.args != "" {
+			// Automatically create a flagset that's not the default one
+			// This will be overwritten if WithFlags is used in the test data
+			testOptions = append(testOptions, configs.WithFlags(flag.NewFlagSet("test", flag.ContinueOnError)))
+			// Convert arg string to WithArgs option
+			testOptions = append(testOptions, configs.WithArgs(strings.Split(test.args, " ")))
+		}
+		if test.options != nil {
+			for _, opt := range test.options {
+				testOptions = append(testOptions, opt)
+			}
+		}
+		err := configs.Load(res, testOptions...)
 
 		// Handle error cases
 		if err != nil {

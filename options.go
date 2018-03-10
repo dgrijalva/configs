@@ -16,7 +16,7 @@ type LoadOption func(*configLoader) error
 // Otherwise, starting point will be an empty flag.FlagSet.
 func WithFlags(fs *flag.FlagSet) LoadOption {
 	if fs == nil {
-		fs = flag.NewFlagSet("config", flag.ContinueOnError)
+		fs = flag.CommandLine
 	}
 	return func(l *configLoader) error {
 		l.UseFlags = fs
@@ -48,6 +48,14 @@ func WithBytes(data []byte) LoadOption {
 func WithReader(rdr io.Reader) LoadOption {
 	return func(l *configLoader) error {
 		l.Reader = rdr
+		return nil
+	}
+}
+
+// Override args. Mostly for testing
+func WithArgs(args []string) LoadOption {
+	return func(l *configLoader) error {
+		l.Args = args
 		return nil
 	}
 }
