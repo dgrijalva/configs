@@ -2,6 +2,7 @@ package configs
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"io"
 	"os"
@@ -15,26 +16,24 @@ func Load(filename string, cfg interface{}, options ...LoadOption) error {
 	}
 }
 
-func ParseBytes(config []byte, cfg interface{}, options ...LoadOption) error {
-	return Parse(bytes.NewReader(config), cfg, options...)
+func ParseBytes(data []byte, cfg interface{}, options ...LoadOption) error {
+	return Parse(bytes.NewReader(data), cfg, options...)
 }
 
-func Parse(config io.Reader, cfg interface{}, options ...LoadOption) error {
-	l := &configLoader{
-		UseFlags: false,
-	}
+func Parse(rdr io.Reader, cfg interface{}, options ...LoadOption) error {
+	l := &configLoader{}
 
 	for _, option := range options {
 		option(l)
 	}
 
-	return l.Parse(config, cfg)
+	return l.Parse(rdr, cfg)
 }
 
 type configLoader struct {
 	UseFlags *flag.FlagSet
 }
 
-func (l *configLoader) Parse(config io.Reader, cfg interface{}) error {
-	return nil
+func (l *configLoader) Parse(rdr io.Reader, cfg interface{}) error {
+	return json.NewDecoder(rdr).Decode(cfg)
 }
