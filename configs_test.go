@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/dgrijalva/configs"
 	"reflect"
 	"strings"
@@ -14,6 +15,19 @@ type A struct {
 	String string  `json:"string"`
 	Float  float64 `json:"float"`
 	Int    int64   `json:"int"`
+}
+
+type B struct {
+	Foo string `json:"foo"`
+}
+
+type C struct {
+	Foo *B `json:"foo"`
+}
+
+type D struct {
+	*A  `json:"a"`
+	Foo string `json:"foo"`
 }
 
 var tests = []struct {
@@ -34,6 +48,26 @@ var tests = []struct {
 		expect: &A{"bar", 4.56, 456},
 		args:   "-string bar -float 4.56 -int 456",
 	},
+	{
+		name:   "nested",
+		config: &C{&B{Foo: "bar"}},
+	},
+	{
+		name:   "nested w/ flags",
+		config: &C{},
+		expect: &C{&B{Foo: "bar"}},
+		args:   "-foo.foo bar",
+	},
+	{
+		name:   "embedded",
+		config: &D{&A{String: "str"}, "bar"},
+	},
+	{
+		name:   "embedded",
+		config: &D{Foo: "bar"},
+		expect: &D{A: &A{String: "foo"}, Foo: "bar"},
+		args:   "-string foo",
+	},
 }
 
 func TestParse(t *testing.T) {
@@ -52,7 +86,7 @@ func TestParse(t *testing.T) {
 		if test.args != "" {
 			// Automatically create a flagset that's not the default one
 			// This will be overwritten if WithFlags is used in the test data
-			testOptions = append(testOptions, configs.WithFlags(flag.NewFlagSet("test", flag.ContinueOnError)))
+			testOptions = append(testOptions, configs.WithFlags(flag.NewFlagSet(fmt.Sprintf("test[%v]", test.name), flag.ContinueOnError)))
 			// Convert arg string to WithArgs option
 			testOptions = append(testOptions, configs.WithArgs(strings.Split(test.args, " ")))
 		}
@@ -67,8 +101,7 @@ func TestParse(t *testing.T) {
 		if err != nil {
 			if test.err == nil {
 				t.Errorf("[%v] Unexpected error: %v", test.name, err)
-			}
-			if err != test.err {
+			} else if err != test.err {
 				t.Errorf("[%v] Error did not meet expectations. Expected %v got %v", test.name, test.err, err)
 
 			}

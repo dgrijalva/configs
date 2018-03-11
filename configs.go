@@ -123,7 +123,7 @@ func (l *configLoader) GenerateFlags(cfg interface{}) error {
 	}
 
 	ch := make(chan flagExtract, 16)
-	go l.extractFlagConfigs(ch, v)
+	go l.extractFlagConfigs(ch, v.Type(), nil, "")
 	for f := range ch {
 		switch f.typ.Kind() {
 		case reflect.String:
@@ -136,34 +136,56 @@ func (l *configLoader) GenerateFlags(cfg interface{}) error {
 			// Dunno what to do
 			continue
 		}
-		l.flagMap[f.index] = f
+		l.flagMap[f.indexes[0]] = f
 	}
 
 	return nil
 }
 
 type flagExtract struct {
-	index int
-	name  string
-	desc  string
-	typ   reflect.Type
-	value interface{}
+	indexes []int
+	name    string
+	desc    string
+	typ     reflect.Type
+	value   interface{}
 }
 
-func (l *configLoader) extractFlagConfigs(ch chan flagExtract, cfg reflect.Value) {
+// recursively traverse config struct type and identify possible flags
+// nested values are separated by a .
+func (l *configLoader) extractFlagConfigs(ch chan flagExtract, typ reflect.Type, indexes []int, parent string) {
 	// Iterate over struct fields and extract flag identifiers
-	typ := cfg.Type()
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
-		fe := flagExtract{index: i, typ: field.Type}
+
+		var ii []int
+		if indexes == nil {
+			ii = []int{i}
+		} else {
+			ii = make([]int, 0, len(indexes)+1)
+			copy(ii, indexes)
+			ii = append(ii, i)
+		}
+
+		fe := flagExtract{indexes: ii, typ: field.Type}
 
 		if name, ok := field.Tag.Lookup("config"); ok {
 			fe.name = strings.Split(name, ",")[0]
 		} else if name, ok := field.Tag.Lookup("json"); ok {
 			fe.name = strings.Split(name, ",")[0]
 		}
+		if parent != "" {
+			fe.name = strings.Join([]string{parent, fe.name}, ".")
+		}
 
-		ch <- fe
+		if field.Type.Kind() == reflect.Struct {
+			l.extractFlagConfigs(ch, field.Type, ii, fe.name)
+		} else if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct {
+			l.extractFlagConfigs(ch, field.Type.Elem(), ii, fe.name)
+		} else {
+			ch <- fe
+		}
 	}
-	close(ch)
+	if parent == "" {
+		close(ch)
+	}
 }
