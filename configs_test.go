@@ -113,7 +113,7 @@ func TestParse(t *testing.T) {
 			test.expect = test.config
 		}
 		if !reflect.DeepEqual(test.expect, res) {
-			t.Errorf("[%v] Parsed config didn't match expectation. Expected %v got %T %v", test.name, test.config, res, res)
+			t.Errorf("[%v] Parsed config didn't match expectation. Expected %T %v got %T %v", test.name, test.expect, test.expect, res, res)
 		}
 	}
 }

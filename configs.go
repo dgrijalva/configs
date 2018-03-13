@@ -24,11 +24,19 @@ func Load(cfg interface{}, options ...LoadOption) error {
 }
 
 type configLoader struct {
-	ConfigFileFlag *flag.Flag
-	UseFlags       *flag.FlagSet
-	Reader         io.Reader
-	Args           []string
-	flagMap        map[int]flagExtract
+	UseFlags *flag.FlagSet
+	Reader   io.Reader
+	Args     []string
+	flagMap  map[int]*flagExtract
+}
+
+type flagExtract struct {
+	index    int
+	name     string
+	desc     string
+	typ      reflect.Type
+	value    interface{}
+	children map[int]*flagExtract
 }
 
 func (l *configLoader) Parse(cfg interface{}) error {
@@ -46,7 +54,7 @@ func (l *configLoader) Parse(cfg interface{}) error {
 
 	// Apply flags to config struct
 	if l.UseFlags != nil {
-		if err := l.ApplyFlags(cfg); err != nil {
+		if err := l.ApplyFlags(cfg, l.flagMap); err != nil {
 			return err
 		}
 	}
@@ -80,7 +88,7 @@ func (l *configLoader) ParseFlags(cfg interface{}) error {
 	return nil
 }
 
-func (l *configLoader) ApplyFlags(cfg interface{}) error {
+func (l *configLoader) ApplyFlags(cfg interface{}, flagMap map[int]*flagExtract) error {
 	var v = reflect.ValueOf(cfg)
 	if v.Kind() != reflect.Ptr {
 		return fmt.Errorf("Config was type %v should be a *struct", v.Kind())
@@ -92,14 +100,25 @@ func (l *configLoader) ApplyFlags(cfg interface{}) error {
 
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
-		f := l.flagMap[i]
-		switch f.typ.Kind() {
-		case reflect.String:
-			field.SetString(*f.value.(*string))
-		case reflect.Float64:
-			field.SetFloat(*f.value.(*float64))
-		case reflect.Int64:
-			field.SetInt(*f.value.(*int64))
+		f := flagMap[i]
+		if f.children != nil {
+			var value reflect.Value
+			if field.Type().Kind() == reflect.Ptr {
+				value = reflect.New(field.Type().Elem())
+			} else {
+				value = reflect.New(field.Type())
+			}
+			field.Set(value)
+			l.ApplyFlags(value.Interface(), f.children)
+		} else {
+			switch f.typ.Kind() {
+			case reflect.String:
+				field.SetString(*f.value.(*string))
+			case reflect.Float64:
+				field.SetFloat(*f.value.(*float64))
+			case reflect.Int64:
+				field.SetInt(*f.value.(*int64))
+			}
 		}
 	}
 
@@ -107,7 +126,10 @@ func (l *configLoader) ApplyFlags(cfg interface{}) error {
 }
 
 // Generate flags for config options
-// Use JSON tags unless config tag is present
+// Priority:
+// 1) flag struct tag (name,description) (TODO: use '-' to skip generating flags for property)
+// 2) json struct tag (see encoding/json documentation)
+// 3) TODO: field name
 func (l *configLoader) GenerateFlags(cfg interface{}) error {
 	var v = reflect.ValueOf(cfg)
 	if v.Kind() != reflect.Ptr {
@@ -119,73 +141,62 @@ func (l *configLoader) GenerateFlags(cfg interface{}) error {
 	}
 
 	if l.flagMap == nil {
-		l.flagMap = make(map[int]flagExtract)
+		l.flagMap = make(map[int]*flagExtract)
 	}
 
-	ch := make(chan flagExtract, 16)
-	go l.extractFlagConfigs(ch, v.Type(), nil, "")
-	for f := range ch {
-		switch f.typ.Kind() {
-		case reflect.String:
-			f.value = l.UseFlags.String(f.name, "", f.desc)
-		case reflect.Float64:
-			f.value = l.UseFlags.Float64(f.name, 0, f.desc)
-		case reflect.Int64:
-			f.value = l.UseFlags.Int64(f.name, 0, f.desc)
-		default:
-			// Dunno what to do
-			continue
-		}
-		l.flagMap[f.indexes[0]] = f
-	}
+	l.extractFlagConfigs(v.Type(), l.flagMap)
+	l.declareFlags("", l.flagMap)
 
 	return nil
 }
 
-type flagExtract struct {
-	indexes []int
-	name    string
-	desc    string
-	typ     reflect.Type
-	value   interface{}
+func (l *configLoader) declareFlags(parentName string, flagMap map[int]*flagExtract) {
+	for _, f := range flagMap {
+		name := f.name
+		if parentName != "" {
+			name = strings.Join([]string{parentName, name}, ".")
+		}
+
+		if f.children != nil && len(f.children) > 0 {
+			l.declareFlags(name, f.children)
+		} else {
+			switch f.typ.Kind() {
+			case reflect.String:
+				f.value = l.UseFlags.String(name, "", f.desc)
+			case reflect.Float64:
+				f.value = l.UseFlags.Float64(name, 0, f.desc)
+			case reflect.Int64:
+				f.value = l.UseFlags.Int64(name, 0, f.desc)
+			default:
+				// Dunno what to do
+				continue
+			}
+		}
+	}
 }
 
 // recursively traverse config struct type and identify possible flags
 // nested values are separated by a .
-func (l *configLoader) extractFlagConfigs(ch chan flagExtract, typ reflect.Type, indexes []int, parent string) {
+func (l *configLoader) extractFlagConfigs(typ reflect.Type, parent map[int]*flagExtract) {
 	// Iterate over struct fields and extract flag identifiers
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 
-		var ii []int
-		if indexes == nil {
-			ii = []int{i}
-		} else {
-			ii = make([]int, 0, len(indexes)+1)
-			copy(ii, indexes)
-			ii = append(ii, i)
-		}
+		fe := &flagExtract{index: i, typ: field.Type}
 
-		fe := flagExtract{indexes: ii, typ: field.Type}
-
-		if name, ok := field.Tag.Lookup("config"); ok {
+		if name, ok := field.Tag.Lookup("flag"); ok {
 			fe.name = strings.Split(name, ",")[0]
 		} else if name, ok := field.Tag.Lookup("json"); ok {
 			fe.name = strings.Split(name, ",")[0]
 		}
-		if parent != "" {
-			fe.name = strings.Join([]string{parent, fe.name}, ".")
-		}
 
 		if field.Type.Kind() == reflect.Struct {
-			l.extractFlagConfigs(ch, field.Type, ii, fe.name)
+			fe.children = make(map[int]*flagExtract)
+			l.extractFlagConfigs(field.Type, fe.children)
 		} else if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct {
-			l.extractFlagConfigs(ch, field.Type.Elem(), ii, fe.name)
-		} else {
-			ch <- fe
+			fe.children = make(map[int]*flagExtract)
+			l.extractFlagConfigs(field.Type.Elem(), fe.children)
 		}
-	}
-	if parent == "" {
-		close(ch)
+		parent[i] = fe
 	}
 }
