@@ -27,12 +27,14 @@ type configLoader struct {
 	UseFlags *flag.FlagSet
 	Reader   io.Reader
 	Args     []string
-	flagMap  map[int]*flagExtract
+	flagMap  map[int]*flagExtract // what flags were defined and how do they map to config
+	setFlags map[string]byte      // set identifying which flags were set
 }
 
 type flagExtract struct {
 	index    int
 	name     string
+	cmdName  string
 	desc     string
 	typ      reflect.Type
 	value    interface{}
@@ -85,6 +87,12 @@ func (l *configLoader) ParseFlags(cfg interface{}) error {
 		return err
 	}
 
+	// Capture which flags have been set
+	l.setFlags = make(map[string]byte)
+	l.UseFlags.Visit(func(f *flag.Flag) {
+		l.setFlags[f.Name] = 1
+	})
+
 	return nil
 }
 
@@ -110,7 +118,8 @@ func (l *configLoader) ApplyFlags(cfg interface{}, flagMap map[int]*flagExtract)
 			}
 			field.Set(value)
 			l.ApplyFlags(value.Interface(), f.children)
-		} else {
+		} else if l.setFlags[f.cmdName] == 1 {
+			// If the field was set with a flag, overwrite existing value
 			switch f.typ.Kind() {
 			case reflect.String:
 				field.SetString(*f.value.(*string))
@@ -152,21 +161,21 @@ func (l *configLoader) GenerateFlags(cfg interface{}) error {
 
 func (l *configLoader) declareFlags(parentName string, flagMap map[int]*flagExtract) {
 	for _, f := range flagMap {
-		name := f.name
+		f.cmdName = f.name
 		if parentName != "" {
-			name = strings.Join([]string{parentName, name}, ".")
+			f.cmdName = strings.Join([]string{parentName, f.cmdName}, ".")
 		}
 
 		if f.children != nil && len(f.children) > 0 {
-			l.declareFlags(name, f.children)
+			l.declareFlags(f.cmdName, f.children)
 		} else {
 			switch f.typ.Kind() {
 			case reflect.String:
-				f.value = l.UseFlags.String(name, "", f.desc)
+				f.value = l.UseFlags.String(f.cmdName, "", f.desc)
 			case reflect.Float64:
-				f.value = l.UseFlags.Float64(name, 0, f.desc)
+				f.value = l.UseFlags.Float64(f.cmdName, 0, f.desc)
 			case reflect.Int64:
-				f.value = l.UseFlags.Int64(name, 0, f.desc)
+				f.value = l.UseFlags.Int64(f.cmdName, 0, f.desc)
 			default:
 				// Dunno what to do
 				continue

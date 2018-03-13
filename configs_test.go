@@ -49,6 +49,12 @@ var tests = []struct {
 		args:   "-string bar -float 4.56 -int 456",
 	},
 	{
+		name:   "flag overwrite",
+		config: &A{"foo", 1.23, 123},
+		args:   "-string bar",
+		expect: &A{"bar", 1.23, 123},
+	},
+	{
 		name:   "nested",
 		config: &C{&B{Foo: "bar"}},
 	},
@@ -72,6 +78,7 @@ var tests = []struct {
 
 func TestParse(t *testing.T) {
 	for _, test := range tests {
+		fmt.Println(test.name)
 		// Write test config JSON to buffer
 		buf := new(bytes.Buffer)
 		json.NewEncoder(buf).Encode(test.config)
