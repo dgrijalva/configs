@@ -66,7 +66,7 @@ var tests = []struct {
 		name:   "embedded",
 		config: &D{Foo: "bar"},
 		expect: &D{A: &A{String: "foo"}, Foo: "bar"},
-		args:   "-string foo",
+		args:   "-a.string foo",
 	},
 }
 
