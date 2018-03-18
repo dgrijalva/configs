@@ -24,6 +24,14 @@ func WithFlags(fs *flag.FlagSet) LoadOption {
 	}
 }
 
+// Load from a file, specified with this flag
+func WithFileFlag(flagname string) LoadOption {
+	return func(l *configLoader) error {
+		l.fileFlagName = flagname
+		return nil
+	}
+}
+
 // Load the config from a specified file path
 func WithFile(filename string) LoadOption {
 	return func(l *configLoader) error {

@@ -26,8 +26,13 @@ type C struct {
 }
 
 type D struct {
-	*A  `json:"a"`
+	*A
 	Foo string `json:"foo"`
+}
+
+type E struct {
+	Foo *A     `json:"foo"`
+	Bar string `json:"bar"`
 }
 
 var tests = []struct {
@@ -44,7 +49,6 @@ var tests = []struct {
 	},
 	{
 		name:   "flags",
-		config: &A{},
 		expect: &A{"bar", 4.56, 456},
 		args:   "-string bar -float 4.56 -int 456",
 	},
@@ -72,23 +76,32 @@ var tests = []struct {
 		name:   "embedded",
 		config: &D{Foo: "bar"},
 		expect: &D{A: &A{String: "foo"}, Foo: "bar"},
-		args:   "-a.string foo",
+		args:   "-string foo",
+	},
+	{
+		name:    "config file",
+		options: []configs.LoadOption{configs.WithFileFlag("config")},
+		expect:  &E{Foo: &A{Int: 123, String: "foo"}, Bar: "baz"},
+		args:    "-config test/e_001.json",
 	},
 }
 
 func TestParse(t *testing.T) {
 	for _, test := range tests {
-		fmt.Println(test.name)
-		// Write test config JSON to buffer
-		buf := new(bytes.Buffer)
-		json.NewEncoder(buf).Encode(test.config)
+		if test.expect == nil && test.config != nil {
+			test.expect = test.config
+		}
 
 		// Create new item to hold parsed results
-		var res interface{} = reflect.New(reflect.Indirect(reflect.ValueOf(test.config)).Type()).Interface()
+		var res interface{} = reflect.New(reflect.Indirect(reflect.ValueOf(test.expect)).Type()).Interface()
 
 		// Load config
-		testOptions := []configs.LoadOption{
-			configs.WithReader(buf),
+		testOptions := []configs.LoadOption{}
+		if test.config != nil {
+			// Write test config JSON to buffer
+			buf := new(bytes.Buffer)
+			json.NewEncoder(buf).Encode(test.config)
+			testOptions = append(testOptions, configs.WithReader(buf))
 		}
 		if test.args != "" {
 			// Automatically create a flagset that's not the default one
@@ -120,7 +133,12 @@ func TestParse(t *testing.T) {
 			test.expect = test.config
 		}
 		if !reflect.DeepEqual(test.expect, res) {
-			t.Errorf("[%v] Parsed config didn't match expectation. Expected %T %v got %T %v", test.name, test.expect, test.expect, res, res)
+			t.Errorf("[%v] Parsed config didn't match expectation. Expected %T %+v got %T %+v", test.name, test.expect, debugJSON(test.expect), res, debugJSON(res))
 		}
 	}
+}
+
+func debugJSON(x interface{}) string {
+	stuff, _ := json.Marshal(x)
+	return string(stuff)
 }

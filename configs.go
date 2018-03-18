@@ -24,11 +24,12 @@ func Load(cfg interface{}, options ...LoadOption) error {
 }
 
 type configLoader struct {
-	UseFlags *flag.FlagSet
-	Reader   io.Reader
-	Args     []string
-	flagMap  map[int]*flagExtract // what flags were defined and how do they map to config
-	setFlags map[string]byte      // set identifying which flags were set
+	UseFlags     *flag.FlagSet
+	Reader       io.Reader
+	Args         []string
+	fileFlagName string               // config file path will be specified by this flag
+	flagMap      map[int]*flagExtract // what flags were defined and how do they map to config
+	setFlags     map[string]byte      // set identifying which flags were set
 }
 
 type flagExtract struct {
@@ -42,16 +43,30 @@ type flagExtract struct {
 }
 
 func (l *configLoader) Parse(cfg interface{}) error {
+	// Create the flag described by WithFileFlag
+	if l.fileFlagName != "" {
+		if l.UseFlags == nil {
+			l.UseFlags = flag.CommandLine
+		}
+		l.UseFlags.String(l.fileFlagName, "", "path to config file")
+	}
+
 	// Extract flags from config struct. Parse flags.
 	if l.UseFlags != nil {
 		if err := l.ParseFlags(cfg); err != nil {
 			return err
 		}
+		if l.fileFlagName != "" {
+			nameFlag := l.UseFlags.Lookup(l.fileFlagName)
+			WithFile(nameFlag.Value.String())(l)
+		}
 	}
 
 	// Parse json config
-	if err := json.NewDecoder(l.Reader).Decode(cfg); err != nil {
-		return err
+	if l.Reader != nil {
+		if err := json.NewDecoder(l.Reader).Decode(cfg); err != nil {
+			return err
+		}
 	}
 
 	// Apply flags to config struct
@@ -97,29 +112,40 @@ func (l *configLoader) ParseFlags(cfg interface{}) error {
 }
 
 func (l *configLoader) ApplyFlags(cfg interface{}, flagMap map[int]*flagExtract) error {
+	// Verify that cfg is a valid type. Indirect pointer to get to struct value.
 	var v = reflect.ValueOf(cfg)
 	if v.Kind() != reflect.Ptr {
-		return fmt.Errorf("Config was type %v should be a *struct", v.Kind())
+		return fmt.Errorf("Config was type %v should be a *struct, A", v.Type())
 	}
 	v = reflect.Indirect(v)
 	if v.Kind() != reflect.Struct {
-		return fmt.Errorf("Config was type %v should be a *struct", v.Kind())
+		return fmt.Errorf("Config was type %v should be a *struct, B", v.Type())
 	}
 
+	// Iterate over struct fields and set the values from flagMap
 	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-		f := flagMap[i]
+		var field = v.Field(i)
+		var f = flagMap[i]
+		var fieldFlagSet = (l.setFlags[f.cmdName] == 1)
+
 		if f.children != nil {
-			var value reflect.Value
-			if field.Type().Kind() == reflect.Ptr {
-				value = reflect.New(field.Type().Elem())
-			} else {
-				value = reflect.New(field.Type())
+			// For children, handle recursively. Create empty structs where necessary
+			var value = field
+			if !value.IsValid() {
+				if field.Type().Kind() == reflect.Ptr {
+					value = reflect.New(field.Type().Elem())
+				} else {
+					value = reflect.New(field.Type())
+				}
+				field.Set(value)
 			}
-			field.Set(value)
-			l.ApplyFlags(value.Interface(), f.children)
-		} else if l.setFlags[f.cmdName] == 1 {
+			// Recurse both value and flagMap
+			if err := l.ApplyFlags(value.Interface(), f.children); err != nil {
+				return err
+			}
+		} else if fieldFlagSet {
 			// If the field was set with a flag, overwrite existing value
+			// Copy values from parsed flags into struct
 			switch f.typ.Kind() {
 			case reflect.String:
 				field.SetString(*f.value.(*string))

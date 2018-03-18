@@ -1,0 +1,4 @@
+{
+  "foo": {"int": 123, "string": "foo"},
+  "bar": "baz"
+}
